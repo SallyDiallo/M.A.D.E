@@ -1,66 +1,56 @@
+// index.js
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const OpenAI = require("openai");
+const cohere = require("cohere-ai");
 
 dotenv.config();
-
-const USE_OPENAI = true;
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+cohere.init(process.env.COHERE_API_KEY);
 
 app.post("/analyze", async (req, res) => {
   const question = req.body.question || "Default question";
 
-  // Fake JSON for testing
-  if (!USE_OPENAI) {
-    return res.json({
-      twins: [
-        { name: "Logical", decision: "Option A", confidence: 80, reasoning: "Reason 1", biggest_concern: "Concern 1" },
-        { name: "Emotional", decision: "Option B", confidence: 70, reasoning: "Reason 2", biggest_concern: "Concern 2" },
-        { name: "Ambitious", decision: "Option C", confidence: 90, reasoning: "Reason 3", biggest_concern: "Concern 3" }
-      ],
-      core_conflict: "Stability vs Growth vs Interest",
-      best_fit_paths: ["Path 1", "Path 2"],
-      recommended_direction: "Option B",
-      execution_plan: { now: "Step 1", next: "Step 2", later: "Step 3" },
-      tradeoffs: "Tradeoffs summary"
-    });
-  }
-
-  // Real OpenAI call
   try {
     const prompt = `
-    You are M.A.D.E backend.
-    Analyze this decision question and return JSON with:
-    - twins (Logical, Emotional, Ambitious) with decision, confidence, reasoning, biggest_concern
-    - core_conflict
-    - best_fit_paths
-    - recommended_direction
-    - execution_plan (now, next, later)
-    - tradeoffs
-    Respond ONLY with valid JSON.
-    Question: "${question}"
-    `;
+You are a career and academic advisor AI.
+Analyze the following decision question and return a JSON object with:
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
+- twins: Logical, Emotional, Ambitious (each with title, decision, reasoning, biggest_concern, confidence)
+- best_fit_paths: array of { career, fit_reason, difficulty, time_to_enter, growth_outlook }
+- salary_projection: array of { career, entry_level, mid_career, senior_level, education_needed, notes }
+
+Respond **ONLY** with valid JSON. Do NOT include any extra text.
+Question: "${question}"
+`;
+
+    const response = await cohere.generate({
+      model: "command-xlarge-nightly",
+      prompt,
+      max_tokens: 600,
       temperature: 0.7,
+      stop_sequences: ["\n\n"]
     });
 
-    const output = completion.choices[0].message.content;
-    const jsonOutput = JSON.parse(output); // make sure OpenAI returns valid JSON
+    const outputText = response.body.generations[0].text;
+
+    // Try parsing AI output into JSON
+    let jsonOutput;
+    try {
+      jsonOutput = JSON.parse(outputText);
+    } catch {
+      return res.status(500).json({ error: "AI returned invalid JSON", raw: outputText });
+    }
 
     res.json(jsonOutput);
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "OpenAI call failed. Check API key or response." });
+    console.error("AI request failed", err);
+    res.status(500).json({ error: "Cohere API call failed", details: err.message });
   }
 });
 
